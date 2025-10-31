@@ -51,7 +51,7 @@ function AppContent() {
           muted 
           playsInline
         >
-          <source src="/Formula_1.mp4" type="video/mp4" />
+          <source src={`${import.meta.env.BASE_URL}Formula_1.mp4`} type="video/mp4" />
           Your browser does not support the video tag.
         </video>
         <div className="video-fallback"></div>
