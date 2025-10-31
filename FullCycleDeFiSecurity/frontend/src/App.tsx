@@ -7,8 +7,12 @@ import StockMarket from './pages/StockMarket'
 import './styles.css'
 
 export default function App() {
+  // Use BASE_URL from Vite config (automatically set based on base in vite.config.ts)
+  // For local dev it will be '/', for GitHub Pages it will be '/FullCycleDeFiSecurity/'
+  const basePath = import.meta.env.BASE_URL || '/'
+  
   return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <Router basename={basePath} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AppContent />
     </Router>
   )
@@ -93,9 +97,11 @@ function AppContent() {
 
         <main>
           <Routes>
+            <Route index element={<Home />} />
             <Route path="/" element={<Home />} />
             <Route path="/audit" element={<SecurityAudit account={account} />} />
             <Route path="/stocks" element={<StockMarket account={account} />} />
+            <Route path="*" element={<Home />} />
           </Routes>
         </main>
       </div>
