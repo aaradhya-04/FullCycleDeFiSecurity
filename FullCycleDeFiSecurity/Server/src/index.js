@@ -337,70 +337,24 @@ app.post('/contract/generate', async (req, res) => {
     }
     
     // Generate FIXED contract directly in memory
-    // Start from the ORIGINAL vulnerable contract
+    // Start from the CURRENT contract file (could be original or already partially fixed)
     let raw = fs.readFileSync(contractPath, 'utf8');
     
-    // Apply ALL previously applied fixes first (incremental fixing)
-    // This ensures we're working from the correct state
-    const fixesToApply = Array.isArray(appliedFixes) ? [...appliedFixes] : [];
-    console.log(`[Generate] Previously applied fixes (will apply first):`, fixesToApply);
-    
-    // Apply previously applied fixes first
-    for (const prevFix of fixesToApply) {
-      if (prevFix === 'setRate' && !raw.match(/setRate[^}]*require\(msg\.sender == owner/)) {
-        raw = raw.replace(
-          /(\s+)(\/\/ Vulnerability: no onlyOwner\s*\n)?(\s+)function\s+setRate\(uint256 newRate,\s*string calldata note\)\s*external\s*\{/,
-          (match, indent1, comment, indent2) => {
-            const indent = indent2 || indent1;
-            const commentLine = comment || `${indent}// Vulnerability: no onlyOwner\n`;
-            return `${commentLine}${indent}function setRate(uint256 newRate, string calldata note) external {\n${indent}    require(msg.sender == owner, "not owner");`;
-          }
-        );
-        console.log('[Generate] ✅ Applied previous fix: setRate');
-      } else if (prevFix === 'emergencyWithdraw' && !raw.match(/emergencyWithdraw[^}]*require\(msg\.sender == owner/)) {
-        raw = raw.replace(
-          /(\s+)(\/\/ Emergency withdraw.*?\n)?(\s+)function\s+emergencyWithdraw\(IERC20 token,\s*address to,\s*uint256 amount\)\s*external\s*\{/,
-          (match, indent1, comment, indent2) => {
-            const indent = indent2 || indent1;
-            const commentLine = comment || `${indent}// Emergency withdraw (demo)\n`;
-            return `${commentLine}${indent}function emergencyWithdraw(IERC20 token, address to, uint256 amount) external {\n${indent}    require(msg.sender == owner, "not owner");`;
-          }
-        );
-        console.log('[Generate] ✅ Applied previous fix: emergencyWithdraw');
-      } else if (prevFix === 'slippage' && !raw.includes('minAmountOut')) {
-        raw = raw.replace(
-          /(\s+)(\/\/ Vulnerability: No slippage protection\s*\n)?(\s+)function\s+swap\(IERC20 tokenIn,\s*IERC20 tokenOut,\s*uint256 amountIn,\s*string calldata race\)\s*external\s*returns\s*\(uint256 amountOut\)\s*\{/,
-          (match, indent1, comment, indent2) => {
-            const indent = indent2 || indent1;
-            const commentLine = comment || `${indent}// Vulnerability: No slippage protection\n`;
-            return `${commentLine}${indent}function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minAmountOut, string calldata race) external returns (uint256 amountOut) {`;
-          }
-        );
-        if (raw.includes('amountOut = (amountIn * rate) / 1e18;')) {
-          raw = raw.replace(
-            /(\s+amountOut = \(amountIn \* rate\) \/ 1e18;)/,
-            '$1\n        require(amountOut >= minAmountOut, "Insufficient output amount");'
-          );
-        }
-        console.log('[Generate] ✅ Applied previous fix: slippage');
-      }
-    }
-    
-    // Now analyze the contract with previously applied fixes to see CURRENT state
+    // First, analyze the current contract to see what vulnerabilities exist
     const { analyzeContract } = require('./services/contractAnalyzer');
     const currentAnalysis = analyzeContract(raw, path.basename(contractPath));
     const currentFindings = currentAnalysis.findings || [];
     
-    console.log(`[Generate] After applying ${fixesToApply.length} previous fixes, contract has ${currentFindings.length} vulnerabilities remaining:`, currentFindings.map(f => `${f.severity}: ${f.id || f.title}`));
+    console.log(`[Generate] Current contract has ${currentFindings.length} vulnerabilities:`, currentFindings.map(f => `${f.severity}: ${f.id || f.title}`));
     
     if (currentFindings.length === 0) {
       console.log('[Generate] ⚠️ Contract is already fully fixed - no more vulnerabilities to fix');
-      // Return the contract as-is (all fixes applied)
+      // Return the contract as-is (all fixes applied) - no changes needed
     } else {
-      console.log(`[Generate] Target: Fix 1 more vulnerability, reducing from ${currentFindings.length} to ${currentFindings.length - 1}`);
+      console.log(`[Generate] Target: Fix exactly 1 vulnerability, reducing from ${currentFindings.length} to ${currentFindings.length - 1}`);
     }
     
-    // Determine which NEW vulnerability to fix (only ONE more)
+    // Determine which vulnerability to fix (only ONE, highest priority)
     // Priority: Critical > High > Medium > Low
     const severityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
     const sortedCurrentFindings = [...currentFindings].sort((a, b) => {
@@ -409,22 +363,8 @@ app.post('/contract/generate', async (req, res) => {
       return aSev - bSev;
     });
     
-    // Find the vulnerability to fix based on fixType or pick the first remaining one
-    let vulnerabilityToFix = null;
-    if (fixType && !fixesToApply.includes(fixType)) {
-      // Only apply if this fix hasn't been applied yet
-      vulnerabilityToFix = sortedCurrentFindings.find(f => {
-        if (fixType === 'setRate') return f.id === 'RS-001' || f.title.includes('setRate');
-        if (fixType === 'emergencyWithdraw') return f.id === 'RS-002' || f.title.includes('emergencyWithdraw');
-        if (fixType === 'slippage') return f.id === 'RS-003' || f.title.includes('slippage');
-        if (fixType === 'reentrancy') return f.id === 'RS-004' || f.title.includes('reentrancy');
-        if (fixType === 'events') return f.id === 'RS-005' || f.title.includes('Events');
-        return false;
-      });
-    } else {
-      // No fixType specified or already applied - fix the highest priority remaining vulnerability
-      vulnerabilityToFix = sortedCurrentFindings[0];
-    }
+    // Pick the highest priority remaining vulnerability (first in sorted list)
+    let vulnerabilityToFix = sortedCurrentFindings[0];
     
     if (!vulnerabilityToFix) {
       console.log('[Generate] ⚠️ No vulnerability found to fix. Contract may already be fully fixed.');
@@ -513,26 +453,34 @@ app.post('/contract/generate', async (req, res) => {
     if (fixApplied) {
       const verifyAnalysis = analyzeContract(raw, path.basename(contractPath));
       const verifyFindings = verifyAnalysis.findings || [];
-      console.log(`[Generate] ✅ After fix: ${verifyFindings.length} vulnerabilities remaining (was ${findings.length})`);
+      console.log(`[Generate] ✅ After fix: ${verifyFindings.length} vulnerabilities remaining (was ${currentFindings.length})`);
       console.log(`[Generate] Fixed vulnerability: ${fixedVulnerability}`);
       
-      if (verifyFindings.length >= findings.length) {
+      if (verifyFindings.length >= currentFindings.length) {
         console.log('[Generate] ⚠️ WARNING: Fix did not reduce vulnerability count! The fix may not have been applied correctly.');
       }
     } else {
       console.log('[Generate] ⚠️ No fix was applied. Contract may already be fixed or no fixable vulnerabilities found.');
     }
     
+    // IMPORTANT: Keep the contract name exactly as it was (don't change it)
+    // This allows SecureDApp to accept it and users can track incremental fixes
+    
     // Use EXACT same normalization as original download (SecureDApp compatible)
     raw = raw.replace(/^\uFEFF/, ''); // strip BOM
     if (!/^\/\/ SPDX-License-Identifier: MIT/m.test(raw)) {
       raw = `// SPDX-License-Identifier: MIT\n${raw}`;
     }
-    // pin pragma to exact 0.8.19
-    raw = raw.replace(/pragma solidity\s+\^?0\.8\.19\s*;/, 'pragma solidity 0.8.19;');
+    // pin pragma to exact 0.8.19 (don't change if already correct)
+    raw = raw.replace(/pragma solidity\s+\^?0\.8\.(19|20|21)\s*;/, 'pragma solidity 0.8.19;');
     const normalized = raw.replace(/\r\n/g, '\n');
+    
+    // Generate filename based on original contract name
+    const originalName = path.basename(contractPath, '.sol');
+    const downloadFilename = originalName.includes('fixed') ? `${originalName}_next.sol` : `${originalName}_fixed.sol`;
+    
     res.setHeader('Content-Type', 'text/x-solidity; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="RaceSwap_vulnerable_flat_fixed.sol"');
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
     return res.end(normalized);
   } catch (e) {
     res.status(500).json({ error: e.message || 'generate failed' });
