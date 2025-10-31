@@ -1,0 +1,15 @@
+[
+  {
+    "tx_hash": "0xlocal1",
+    "from": "0xSponsor1",
+    "to": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24",
+    "token_in": "MTK",
+    "token_out": "ETH",
+    "amount_in": 1000,
+    "gas_price_gwei": 40,
+    "nonce": 1,
+    "timestamp": "2025-10-30T09:00:00Z",
+    "race": "Monaco2025",
+    "tx_purpose": "sponsor_payout"
+  }
+]

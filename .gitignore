@@ -1,0 +1,20 @@
+# Node / JS
+node_modules/
+.env
+.DS_Store
+/build
+/dist
+/*.log
+
+# Truffle / Solidity build
+SmartContract/build/
+SmartContract/.env
+Backend/
+OneDrive/
+
+# VSCode
+.vscode/
+
+# Mac/Windows
+Thumbs.db
+desktop.ini
